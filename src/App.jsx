@@ -1,139 +1,97 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { io } from 'socket.io-client';
+import React, { useState } from 'react';
 import axios from 'axios';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconUrl: markerIcon,
-  iconRetinaUrl: markerIcon2x,
-  shadowUrl: markerShadow,
-});
-
-// Helper component to smoothly re-center the map when device updates
-function RecenterMap({ center }) {
-  const map = useMap();
-  useEffect(() => {
-    if (center && center[0] !== 0) {
-      map.setView(center, 13);
-    }
-  }, [center, map]);
-  return null;
-}
+import MapView from './MapView'; // Move your Leaflet map code into MapView.jsx
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
 function App() {
-  const [locations, setLocations] = useState({});
+  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'forgot'
+  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    // 1. Fetch existing locations on load
-    axios.get(`${BACKEND_URL}/api/locations`)
-      .then((response) => {
-        const initialMap = {};
-        const data = response.data;
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-        // Handle both array and object responses from backend
-        const list = Array.isArray(data) ? data : (data.locations || []);
-        
-        list.forEach((loc) => {
-          const devId = loc.device_id || loc.deviceId;
-          if (devId) {
-            initialMap[devId] = {
-              device_id: devId,
-              latitude: parseFloat(loc.latitude),
-              longitude: parseFloat(loc.longitude)
-            };
-          }
-        });
-        setLocations(initialMap);
-      })
-      .catch((err) => console.error("Error fetching locations:", err));
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const endpoint = authMode === 'signup' ? '/api/auth/register' 
+                     : authMode === 'login' ? '/api/auth/login' 
+                     : '/api/auth/forgot-password';
 
-    // 2. Connect to Socket.IO
-    const socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling']
-    });
-
-    socket.on('connect', () => {
-      console.log("Connected to Backend Socket at:", BACKEND_URL);
-    });
-
-    // Handle incoming socket updates
-    socket.on('locationUpdate', (data) => {
-      console.log("Received live location data:", data);
-      const devId = data.device_id || data.deviceId;
+      const res = await axios.post(`${BACKEND_URL}${endpoint}`, formData);
       
-      if (devId) {
-        setLocations((prev) => ({
-          ...prev,
-          [devId]: {
-            device_id: devId,
-            latitude: parseFloat(data.latitude),
-            longitude: parseFloat(data.longitude)
-          }
-        }));
+      if (res.data.token) {
+        localStorage.setItem('token', res.data.token);
+        setToken(res.data.token);
+      } else {
+        alert(res.data.message);
+        if (authMode === 'forgot') setAuthMode('login');
       }
-    });
+    } catch (err) {
+      setError(err.response?.data?.message || 'An error occurred');
+    }
+  };
 
-    return () => socket.disconnect();
-  }, []);
-
-  const deviceList = Object.values(locations);
-  
-  // Set center dynamically to first device location, or fallback
-  const mapCenter = deviceList.length > 0 
-    ? [deviceList[0].latitude, deviceList[0].longitude] 
-    : [37.422, -122.084]; // Default to Palo Alto / Emulator coordinates
+  if (token) {
+    return <MapView onLogout={() => { localStorage.removeItem('token'); setToken(null); }} />;
+  }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-      <header style={{
-        position: 'absolute',
-        top: 10,
-        left: 50,
-        zIndex: 1000,
-        background: 'rgba(255, 255, 255, 0.95)',
-        padding: '10px 20px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
-      }}>
-        <h2 style={{ margin: 0, fontSize: '18px' }}>MTF Live Tracking Dashboard</h2>
-        <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#333', fontWeight: 'bold' }}>
-          Active Devices: {deviceList.length}
+    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Arial, sans-serif' }}>
+      {/* Left Landing Section */}
+      <div style={{ flex: 1, background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)', color: '#fff', padding: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <h1 style={{ fontSize: '42px', marginBottom: '20px' }}>MTF Real-Time Tracking</h1>
+        <p style={{ fontSize: '18px', lineHeight: '1.6', opacity: 0.9 }}>
+          Enterprise-grade live device telemetry, route analytics, and fleet management from a unified cloud console.
         </p>
-      </header>
+      </div>
 
-      <MapContainer 
-        center={mapCenter} 
-        zoom={13} 
-        style={{ width: '100%', height: '100%' }}
-      >
-        <RecenterMap center={mapCenter} />
-        
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+      {/* Right Side Auth Panel */}
+      <div style={{ width: '450px', padding: '60px 40px', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: '#fff' }}>
+        <h2 style={{ marginBottom: '10px' }}>
+          {authMode === 'login' && 'Welcome Back'}
+          {authMode === 'signup' && 'Create Account'}
+          {authMode === 'forgot' && 'Reset Password'}
+        </h2>
+        {error && <p style={{ color: 'red', fontSize: '14px' }}>{error}</p>}
 
-        {deviceList.map((dev) => (
-          <Marker key={dev.device_id} position={[dev.latitude, dev.longitude]}>
-            <Popup>
-              <strong>Device:</strong> {dev.device_id}<br />
-              <strong>Lat:</strong> {dev.latitude}<br />
-              <strong>Lng:</strong> {dev.longitude}
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          {authMode === 'signup' && (
+            <input name="name" placeholder="Full Name" onChange={handleChange} required style={inputStyle} />
+          )}
+          <input name="email" type="email" placeholder="Email Address" onChange={handleChange} required style={inputStyle} />
+          {authMode !== 'forgot' && (
+            <input name="password" type="password" placeholder="Password" onChange={handleChange} required style={inputStyle} />
+          )}
+
+          <button type="submit" style={btnStyle}>
+            {authMode === 'login' ? 'Log In' : authMode === 'signup' ? 'Sign Up' : 'Send Reset Link'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: '20px', fontSize: '14px', textAlign: 'center' }}>
+          {authMode === 'login' && (
+            <>
+              <span onClick={() => setAuthMode('forgot')} style={linkStyle}>Forgot Password?</span>
+              <p>Don't have an account? <span onClick={() => setAuthMode('signup')} style={linkStyle}>Sign Up</span></p>
+            </>
+          )}
+          {authMode === 'signup' && (
+            <p>Already have an account? <span onClick={() => setAuthMode('login')} style={linkStyle}>Log In</span></p>
+          )}
+          {authMode === 'forgot' && (
+            <span onClick={() => setAuthMode('login')} style={linkStyle}>Back to Login</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
+
+const inputStyle = { padding: '12px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '15px' };
+const btnStyle = { padding: '12px', background: '#1e3c72', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' };
+const linkStyle = { color: '#1e3c72', cursor: 'pointer', fontWeight: 'bold' };
 
 export default App;
